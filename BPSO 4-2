@@ -1,0 +1,193 @@
+ #--------------------------------------------------------
+ # Choose hyperparameters
+ #--------------------------------------------------------
+ n <- 30 # number of particles 
+ m.l <- 100 # number of iterations
+ w <- 0.7298 # inertia weight of velocit
+ c1 <- 1.49618 # cognative component - degree of self confidence of the particle
+ c2 <- 1.49618 # social component - capability of the swarm to find a better solution 
+ vmax <- 6 # can go up to 6 according to literature
+ num_f <- ncol(data) 
+ num_f <- num_f-1 # Number of features without class variable
+ #--------------------------------------------------------
+ # Create initial fitness and velocity values
+ #--------------------------------------------------------
+
+ # Maak initial fitness values vir elke particle 
+ init_fit <- matrix(0, ncol=1, nrow=n)
+
+ # Maak initial velocity values vir elke particle - formule volgens main paper
+ # v = -vmax + 2 s vmax
+ # s/init_vv between 0 and 1
+ #init_vv <- matrix(runif(num_f*n, 0, 1), ncol=num_f, nrow=n)
+ #init_v <- -vmax + 2*init_vv*vmax
+ init_v <- matrix(0, ncol=num_f, nrow=n)
+
+ #----------------------------------------------------------------
+ # Create initial particles for x, personal best and global best
+ #----------------------------------------------------------------
+
+ # MIXED STRATEGY for creating particle values
+ small <- round(num_f*(0.1))
+ large <- round(num_f*(0.55))
+ x_in_small <- matrix(0,nrow=n*(2/3),ncol = num_f)
+ x_in_large <- matrix(0,nrow=n*(1/3),ncol = num_f)
+ small_limit <-round(n*(2/3))
+ large_limit <-round(n*(1/3))
+
+ for (i in 1:small_limit) {
+   small_sample <- sample(1:num_f,small)
+   x_in_small[i,small_sample] = 1
+ }
+
+ for (i in 1:large_limit){
+   large_sample <- sample(1:num_f,large)
+   print(i)
+   print(large_sample)
+   x_in_large[i,large_sample] = 1
+ }
+ x_in <- rbind(x_in_small,x_in_large)
+
+ # Create initial personal best positions for particles - but this is just a placeholder
+ pers_in <- replicate(n,r_sample_binary(num_f, x = 0:1, prob = NULL, name = "Binary"),simplify=FALSE)
+ pers_in <- matrix(unlist(pers_in), ncol=num_f, byrow = TRUE) # maak list net gou n matrix
+
+ # Create initial global best position for particles 
+ global_best <- r_sample_binary(num_f, x = 0:1, prob = NULL, name = "Binary")
+ 
+ # Empty matrices being filled
+ v <- matrix(0, nrow = n, ncol = num_f) # velocity
+ x_new <- matrix(0, nrow = n, ncol = num_f) # updated particles
+ fitness_val = matrix(0,nrow = n,ncol = 1) # updated fitness values
+ 
+ # initialize a global fit that's super small because we want to get the highest accuracy possible with the least number of features
+ global_init_fit = 0
+ pers_best_fit = matrix(0,nrow=n,ncol=1)
+ zz <- 0 # to keep track of what happens to the accuracy along all the iterations
+ track_v <- 0
+ aa <- 0
+
+
+for (q in 1:m.l){ # which iteration
+  for (i in 1:n){ # which particle
+    #-----------------------------------------
+    # STEP 1: EVALUATE EACH PARTICLE IN SWARM
+    #-----------------------------------------
+    Y_idx = createDataPartition(data[,c(which(x_in[i,]==1),ncol(data))]$Y, p = 0.70, list = FALSE) 
+    Y_trn = data[Y_idx,c(which(x_in[i,]==1),ncol(data)) ]
+    Y_trn$Y <- as.factor(Y_trn$Y)# because there are only two classes
+    Y_tst = data[-Y_idx,c(which(x_in[i,]==1),ncol(data))]
+  
+    # Apply knn cross validation
+    trControl <- trainControl(method  = "cv",
+                              number  = 10)
+    fit <- train(Y ~ .,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 5),
+             trControl  = trControl,
+             metric     = "Accuracy",
+             data       = Y_trn)
+    P <- fit$results$Accuracy
+    test_P <- calc_acc(actual = Y_tst$Y,
+         predicted = predict(fit, newdata = Y_tst))
+
+    fitness_val[i] <- P
+    
+    #-----------------------------------------
+    # STEP 2: SWARM & PARTICLE BEST VALUES
+    #-----------------------------------------
+  
+    # Update personal & global best position
+    # Vergelyk nuwe fitness van hierdie particle met vorige fitness en vervang indien beter 
+    # CLASSIFICATION PERFORMANCE AS FIRST PRIORITY
+    
+    if (fitness_val[i] > init_fit[i]){
+      pers_in[i,] <-  x_in[i,]
+      pers_best_fit[i] <- fitness_val[i]
+    }
+    if (fitness_val[i] == init_fit[i] && (sum(x_in[i,])) < (sum(pers_in[i,]))){
+      pers_in[i,] <-  x_in[i,]
+      pers_best_fit[i] <- fitness_val[i]
+    }
+      
+    if (max(pers_best_fit) > global_init_fit){
+      global_best = pers_in[which.max(pers_best_fit),]
+      global_init_fit = max(pers_best_fit)
+      what_happens_to_gbest = global_init_fit
+    }
+    if (max(pers_best_fit) == global_init_fit && sum(pers_in[which.max(pers_best_fit),]) < sum(global_best)){
+      global_best <-  pers_in[which.max(pers_best_fit),]
+      global_init_fit = max(pers_best_fit)
+      what_happens_to_gbest = global_init_fit
+    }
+    #zz <- c(zz,what_happens_to_gbest)
+    #aa <- c(aa,sum(global_best))
+    
+    # IMPROVING NUMBER OF FEATURES AND CLASSIFICATION ACCURACY
+    
+#    if (fitness_val[i] > init_fit[i] && (sum(x_in[i,])) <= (sum(pers_in[i,]))){
+#      pers_in[i,] <-  x_in[i,]
+#      pers_best_fit[i] <- fitness_val[i]
+#    }
+#    if (fitness_val[i] == init_fit[i] && (sum(x_in[i,])) < (sum(pers_in[i,]))){
+#      pers_in[i,] <-  x_in[i,]
+#      pers_best_fit[i] <- fitness_val[i]
+#    }   
+#      
+#    if (max(pers_best_fit) > global_init_fit && sum(pers_in[which.max(pers_best_fit),]) <= sum(global_best)){
+#      global_best = pers_in[which.max(pers_best_fit),]
+#      global_init_fit = max(pers_best_fit)
+#      what_happens_to_gbest = global_init_fit
+#    }
+#    if (max(pers_best_fit) == global_init_fit && sum(pers_in[which.max(pers_best_fit),]) < sum(global_best)){
+#      global_best <-  pers_in[which.max(pers_best_fit),]
+#      global_init_fit = max(pers_best_fit)
+#      what_happens_to_gbest = global_init_fit
+#    }
+#    zz<- c(zz,what_happens_to_gbest)
+    
+    
+    #-----------------------------------------
+    # STEP 4: UPDATE VELOCITIES
+    #-----------------------------------------
+    
+    # Update velocity
+    r1 <- runif(1) 
+    r2 <- runif(1)
+    #al <- 1/pi^2
+    #w <- wmax - (wmax - wmin)*(q/m.l)^(al) # non-linear decreasing strategy
+    
+
+    for (j in 1:num_f){
+      
+      v[i,j] <- w*init_v[i,j] + c1*r1*(pers_in[i,j] - x_in[i,j]) + c2*r2*(global_best[j]-x_in[i,j])
+      
+      
+      #if(v[i,j] > vmax || v[i,j] < -vmax){
+      # v[i,j] <- vmax
+      #} 
+      
+      init_v[i,j] = v[i,j]
+      
+      
+      # Update particle position
+      if (x_in[i,j]+v[i,j] > 0.6){
+        x_new[i,j] <- 1
+      } else{x_new[i,j] <- 0}
+      
+    }
+    
+    if(sum(x_new[i,]) == 0){
+      x_new[i,] <- numeric(num_f)+1
+    }
+    
+    track_v<- c(track_v,max(init_v))  
+
+    x_in[i,] <- x_new[i,]
+
+    
+  }
+  
+  # you are done with the first set of N particles move on to next iteration
+  init_fit = fitness_val
+}
